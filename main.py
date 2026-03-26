@@ -6,7 +6,6 @@ import yfinance as yf
 import pandas as pd
 import re
 import requests
-from dotenv import load_dotenv
 
 
 
@@ -98,29 +97,13 @@ def pega_dados_mercado(lista_tickers):
             print(f"❌ Erro ao coletar {ticker}: {e}")
     return novos_dados
 
-# df_mercado=pd.DataFrame(pega_dados_mercado(lista_tickers))
-# df_final = pd.merge(df_cadastro, df_mercado, on="ticker", how="left")
-# print(df_final.head())
-
-# def gnews_scraper(ticker):
-#     # Busca notícias da empresa no Google News Brasil
-#     url = f"https://news.google.com/rss/search?q={ticker}+stock+B3&hl=pt-BR&gl=BR&ceid=BR:pt-419"
-#     feed = feedparser.parse(url)
-    
-#     for entry in feed.entries[:5]:
-#         print(f"Notícia: {entry.title}")
-#         print(f"Link: {entry.link}")
-
-# gnews_scraper(lista_tickers[0])]
+df_mercado=pd.DataFrame(pega_dados_mercado(lista_tickers))
+df_final = pd.merge(df_cadastro, df_mercado, on="ticker", how="left")
+print(df_final.head())
 
 def busca_noticias_pro(ticker_nome):
-    load_dotenv()
-    API_KEY = os.getenv("API_KEY")
-    if not API_KEY:
-        print("Erro: API_KEY não encontrada no ambiente.")
-        return []
-    
-    url = f"https://newsapi.org/v2/everything?q={ticker_nome}&language=pt&sortBy=publishedAt&apiKey={API_KEY}"
+    api_key = "b2dea0b5ebce41bcb77adf0348289540"
+    url = f"https://newsapi.org/v2/everything?q={ticker_nome}&language=pt&sortBy=publishedAt&apiKey={api_key}"
     
     response = requests.get(url).json()
     artigos = response.get('articles', [])[:5]

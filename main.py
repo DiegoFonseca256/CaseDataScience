@@ -9,6 +9,8 @@ import requests
 import yfinance as yf
 from dotenv import load_dotenv
 
+from LLM import analisar_lote
+
 load_dotenv()
 
 LISTA_TICKERS    = ["ASAI3", "RECV3", "MOVI3", "BRKM5", "HBSA3",
@@ -166,3 +168,17 @@ if __name__ == "__main__":
     # 4. Tratamento
     df_final = tratamento_dados(df_final)
     print(df_final[["ticker", "preco_atual", "variacao_dia", "market_cap", "P/L"]].head())
+
+      # 5. Análise LLM — usa analyst.py
+    print("\n=== Gerando análises com LLM ===")
+    df_relatorios = analisar_lote(df_final, pausa=1.0)
+ 
+    # 6. Merge com relatórios
+    df_completo = pd.merge(df_final, df_relatorios, on="ticker", how="left")
+ 
+    # 7. Remove coluna de notícias brutas antes de salvar
+    df_completo.drop(columns=["noticias"], errors="ignore", inplace=True)
+ 
+    # 8. Salva
+    df_completo.to_csv("empresas_com_analise.csv", index=False, encoding="utf-8")
+    print("\n✅ Concluído. Resultado em: empresas_com_analise.csv")

@@ -177,8 +177,10 @@ def construir_prompt(linha: pd.Series) -> str:
         f"Retorne APENAS este JSON preenchido:\n"
         f'{{"resumo_negocio":"2-3 frases sobre modelo de negócio e geração de valor",'
         f'"analise_fundamentos":"interpretação dos indicadores em conjunto — qualidade, risco e momento",'
-        f'"noticias":{{"positivas":[],"negativas":[],"neutras":[]}},'
-        f'"sentimentos":{{}},'
+        f'Retorne as notícias analisadas neste formato: '
+        f'"noticias": ['
+        f'  {{"titulo": "título original da notícia", "sentimento": "positiva/negativa/neutra"}}'
+        f']'
         f'"perguntas_analista":["pergunta1","pergunta2","pergunta3"]}}'
     )
 

@@ -51,13 +51,22 @@ def coletar_historico(ticker: str, periodo: str = "6mo") -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def sentimento(titulo: str, positivas: set, negativas: set) -> str:
-    """Identifica o sentimento da notícia consultando as listas do noticias_json."""
-    t = titulo.strip().lower()
-    if any(t in s or s in t for s in positivas):
-        return "positiva"
-    if any(t in s or s in t for s in negativas):
-        return "negativa"
+def obter_sentimento_llm(titulo_alvo: str, noticias_analisadas: list) -> str:
+    """
+    Busca o sentimento atribuído pelo LLM para um título específico.
+    """
+    if not titulo_alvo or not noticias_analisadas:
+        return "neutra"
+    
+    t_alvo = titulo_alvo.strip().lower()
+
+    for item in noticias_analisadas:
+        t_item = item.get("titulo", "").strip().lower()
+        
+        # Verifica se os títulos batem (total ou parcialmente)
+        if t_item in t_alvo or t_alvo in t_item:
+            return item.get("sentimento", "neutra")
+            
     return "neutra"
 
 
@@ -67,8 +76,6 @@ def renderizar_cards_noticias(noticias_raw: list, noticias_llm: dict) -> None:
         st.caption("Sem notícias. Configure `NEWS_API_KEY` no `.env` e execute `python main.py`.")
         return
 
-    positivas = {t.strip().lower() for t in noticias_llm.get("positivas", [])}
-    negativas = {t.strip().lower() for t in noticias_llm.get("negativas", [])}
 
     cores  = {"positiva": "#22c55e", "negativa": "#ef4444", "neutra": "#94a3b8"}
     labels = {"positiva": "Positiva", "negativa": "Negativa", "neutra": "Neutra"}
@@ -82,7 +89,7 @@ def renderizar_cards_noticias(noticias_raw: list, noticias_llm: dict) -> None:
         data   = (artigo.get("publishedAt") or "")[:10]
         imagem = artigo.get("urlToImage") or placeholder
         descr  = (artigo.get("description") or "")[:120]
-        sent   = sentimento(titulo, positivas, negativas)
+        sent   = obter_sentimento_llm(titulo,noticias_llm)
         cor    = cores[sent]
         label  = labels[sent]
 
@@ -296,24 +303,9 @@ else:
     st.divider()
     st.subheader("📰 Notícias classificadas pela IA")
     try:
-        noticias_llm = json.loads(linha.get("noticias_json", "{}") or "{}")
+        noticias_llm = json.loads(linha.get("noticias_json", "[]") or "[]")
     except (json.JSONDecodeError, TypeError):
-        noticias_llm = {}
-
-    tab_pos, tab_neg, tab_neu = st.tabs([
-        f"🟢 Positivas ({len(noticias_llm.get('positivas', []))})",
-        f"🔴 Negativas ({len(noticias_llm.get('negativas', []))})",
-        f"⚪ Neutras ({len(noticias_llm.get('neutras', []))})",
-    ])
-    with tab_pos:
-        for n in noticias_llm.get("positivas", []) or ["Nenhuma identificada."]:
-            st.success(n)
-    with tab_neg:
-        for n in noticias_llm.get("negativas", []) or ["Nenhuma identificada."]:
-            st.error(n)
-    with tab_neu:
-        for n in noticias_llm.get("neutras", []) or ["Nenhuma identificada."]:
-            st.info(n)
+        noticias_llm = []
 
 st.divider()
 
@@ -324,9 +316,9 @@ st.subheader("🗞️ Notícias com foto")
 
 try:
     noticias_raw = json.loads(linha.get("noticias_raw_json", "[]") or "[]")
-    noticias_llm = json.loads(linha.get("noticias_json", "{}") or "{}")
+    noticias_llm = json.loads(linha.get("noticias_json", "[]]") or "[]")
 except (json.JSONDecodeError, TypeError):
     noticias_raw = []
-    noticias_llm = {}
+    noticias_llm = []
 
 renderizar_cards_noticias(noticias_raw, noticias_llm)

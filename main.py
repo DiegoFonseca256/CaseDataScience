@@ -95,6 +95,20 @@ def busca_noticias(ticker_nome):
 # Mercado — inclui preco_atual, variacao_dia e market_cap
 # ---------------------------------------------------------------------------
 
+def pegar_minima_52s(ticker):
+    # 1. Tenta pelo campo pronto da API
+    info = yf.Ticker(ticker + ".SA").info
+    minima = info.get("fiftyTwoWeekLow")
+    
+    # 2. Se vier 0, None ou NaN, calculamos manualmente pelo histórico
+    if not minima or minima == 0:
+        # Pega o histórico do último 1 ano (1y)
+        hist = yf.Ticker(ticker + ".SA").history(period="1y")
+        if not hist.empty:
+            minima = hist['Low'].min() # Pega o menor valor da coluna 'Low'
+            
+    return minima
+
 def pega_dados_mercado(lista_tickers):
     novos_dados = []
 
@@ -121,7 +135,7 @@ def pega_dados_mercado(lista_tickers):
                 "Vol Med Diário":       info.get("averageVolume"),
                 "Margem Operacional":   info.get("operatingMargins"),
                 "Máxima 52 Semanas":    info.get("fiftyTwoWeekHigh"),
-                "Mínima 52 Semanas":    info.get("fiftyTwoWeekLow"),
+                "Mínima 52 Semanas":    pegar_minima_52s(ticker),
                 # ── Notícias (lista de dicts da NewsAPI) ─────────────────────
                 "noticias":             noticias,
             }

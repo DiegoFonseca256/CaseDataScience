@@ -70,11 +70,11 @@ FORMATO: responda SOMENTE em JSON válido, sem markdown, sem texto fora do JSON.
 # CAMADA 2 — Formatação
 # ---------------------------------------------------------------------------
 
-def _fmt(val, sufixo: str = "", dec: int = 2) -> str:
+def _fmt(val, sufixo: str = "",prefixo="", dec: int = 2) -> str:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return "N/D"
     try:
-        return f"{float(val):.{dec}f}{sufixo}"
+        return f"{prefixo}{float(val):.{dec}f}{sufixo}"
     except (TypeError, ValueError):
         return "N/D"
 

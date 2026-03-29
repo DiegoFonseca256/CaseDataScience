@@ -1,4 +1,12 @@
+"""
+main.py
+Coleta dados de mercado, notícias e gera análise com LLM.
 
+Novos campos adicionados:
+  - preco_atual      → currentPrice
+  - variacao_dia     → regularMarketChangePercent
+  - market_cap       → marketCap
+"""
 import io
 import json
 import os
@@ -9,7 +17,7 @@ import requests
 import yfinance as yf
 from dotenv import load_dotenv
 
-from LLM import analisar_lote
+from LLM import analisar_lote  # importa o módulo que acabamos de criar
 
 load_dotenv()
 
@@ -23,7 +31,6 @@ NEWS_API_KEY     = os.getenv("NEWS_API_KEY", "")
 # Cadastro
 # ---------------------------------------------------------------------------
 
-# Criamos um arquivo para acessar mais rapidamente os dados cadastrais e os buscamos
 def escreve_dados_empresa(lista_tickers, nome_arquivo=ARQUIVO_CADASTRO):
     with open(nome_arquivo, "w", encoding="utf-8") as arq:
         for ticker in lista_tickers:
@@ -48,7 +55,7 @@ def salvar_dados_empresa():
     else:
         escreve_dados_empresa(LISTA_TICKERS)
 
-# Cria um dataframe
+
 def cria_df_dados_cadastro():
     with open(ARQUIVO_CADASTRO, "r", encoding="utf-8") as f:
         linhas = [line.strip() for line in f if line.strip()]
@@ -67,7 +74,6 @@ def cria_df_dados_cadastro():
 # Notícias
 # ---------------------------------------------------------------------------
 
-# Busca noticias com uma API de busca de noticias
 def busca_noticias(ticker_nome):
     if not NEWS_API_KEY:
         print(f"⚠️  NEWS_API_KEY ausente — sem notícias para {ticker_nome}")
@@ -86,10 +92,9 @@ def busca_noticias(ticker_nome):
 
 
 # ---------------------------------------------------------------------------
-# Mercado
+# Mercado — inclui preco_atual, variacao_dia e market_cap
 # ---------------------------------------------------------------------------
 
-# Busca dados do mercado com yfinance
 def pega_dados_mercado(lista_tickers):
     novos_dados = []
 
@@ -133,7 +138,6 @@ def pega_dados_mercado(lista_tickers):
 # Tratamento
 # ---------------------------------------------------------------------------
 
-#Trata os dados nulos
 def tratamento_dados(df: pd.DataFrame) -> pd.DataFrame:
     """Recebe df como parâmetro e retorna df tratado — sem variáveis globais."""
     cols_financeiras = [
@@ -150,7 +154,7 @@ def tratamento_dados(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Principal
+# Pipeline principal
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -169,16 +173,20 @@ if __name__ == "__main__":
     df_final = tratamento_dados(df_final)
     print(df_final[["ticker", "preco_atual", "variacao_dia", "market_cap", "P/L"]].head())
 
-      # 5. Análise LLM — usa analyst.py
+    # 5. Análise LLM — usa analyst.py
     print("\n=== Gerando análises com LLM ===")
     df_relatorios = analisar_lote(df_final, pausa=1.0)
- 
+
     # 6. Merge com relatórios
     df_completo = pd.merge(df_final, df_relatorios, on="ticker", how="left")
- 
-    # 7. Remove coluna de notícias brutas antes de salvar
-    df_completo.drop(columns=["noticias"], errors="ignore", inplace=True)
- 
+
+    # 7. Serializa notícias brutas como JSON string para o dashboard usar urlToImage e url
+    if "noticias" in df_completo.columns:
+        df_completo["noticias_raw_json"] = df_completo["noticias"].apply(
+            lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else "[]"
+        )
+        df_completo.drop(columns=["noticias"], inplace=True)
+
     # 8. Salva
     df_completo.to_csv("empresas_com_analise.csv", index=False, encoding="utf-8")
     print("\n✅ Concluído. Resultado em: empresas_com_analise.csv")

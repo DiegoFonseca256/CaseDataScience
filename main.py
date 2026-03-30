@@ -17,7 +17,8 @@ import requests
 import yfinance as yf
 from dotenv import load_dotenv
 
-from LLM import analisar_lote  # importa o módulo que acabamos de criar
+from LLM import analisar_lote
+from database import get_conn, init_db
 
 load_dotenv()
 
@@ -31,43 +32,53 @@ NEWS_API_KEY     = os.getenv("NEWS_API_KEY", "")
 # Cadastro
 # ---------------------------------------------------------------------------
 
-def escreve_dados_empresa(lista_tickers, nome_arquivo=ARQUIVO_CADASTRO):
-    with open(nome_arquivo, "w", encoding="utf-8") as arq:
+def salvar_empresas_no_db(lista_tickers):
+
+    with get_conn() as conn:
         for ticker in lista_tickers:
             try:
+                # Coleta via yfinance
                 info = yf.Ticker(ticker + ".SA").info
-                dic_empresa = {
-                    "nome":       info.get("longName"),
-                    "ticker":     ticker,
-                    "setor":      info.get("sectorDisp"),
-                    "segAtuacao": info.get("industryDisp"),
-                    "descricao":  info.get("longBusinessSummary"),
-                }
-                arq.write(json.dumps(dic_empresa, ensure_ascii=False) + "\n")
-                print(f"✅ {ticker} salvo com sucesso.")
+                
+                # Prepara os dados conforme o schema do seu database.py
+                nome = info.get("longName")
+                setor = info.get("sectorDisp")
+                segmento = info.get("industryDisp")
+                descricao = info.get("longBusinessSummary")
+
+                # Executa o UPSERT
+                conn.execute('''
+                    INSERT INTO empresas (ticker, nome, setor, segAtuacao, descricao)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(ticker) DO UPDATE SET
+                        nome = excluded.nome,
+                        setor = excluded.setor,
+                        segAtuacao = excluded.segAtuacao,
+                        descricao = excluded.descricao
+                ''', (ticker, nome, setor, segmento, descricao))
+                
+                print(f"✅ {ticker} (Estático) salvo/atualizado no DB.")
+                
             except Exception as e:
-                print(f"Erro ao processar {ticker}: {e}")
-
-
-def salvar_dados_empresa():
-    if os.path.exists(ARQUIVO_CADASTRO):
-        print("Já existe esse arquivo")
-    else:
-        escreve_dados_empresa(LISTA_TICKERS)
+                print(f"❌ Erro ao processar dados estáticos de {ticker}: {e}")
 
 
 def cria_df_dados_cadastro():
-    with open(ARQUIVO_CADASTRO, "r", encoding="utf-8") as f:
-        linhas = [line.strip() for line in f if line.strip()]
-
-    dados_lista = []
-    for line in linhas:
-        try:
-            dados_lista.append(pd.read_json(io.StringIO(line), typ="series"))
-        except Exception as e:
-            print(f"Erro ao processar linha: {e}")
-
-    return pd.DataFrame(dados_lista)
+    query = "SELECT * FROM empresas"
+    
+    try:
+        with get_conn() as conn:
+            # O pandas lê a query e já fecha a conexão ao terminar
+            df = pd.read_sql(query, conn)
+            
+        if df.empty:
+            print("⚠️ A tabela 'empresas' está vazia. Rode salvar_empresas_no_db primeiro.")
+            
+        return df
+        
+    except Exception as e:
+        print(f"❌ Erro ao ler dados de cadastro do banco: {e}")
+        return pd.DataFrame() # Retorna um DF vazio para não quebrar o pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +185,7 @@ def tratamento_dados(df: pd.DataFrame) -> pd.DataFrame:
 if __name__ == "__main__":
 
     # 1. Cadastro
-    salvar_dados_empresa()
+    salvar_empresas_no_db(LISTA_TICKERS)
     df_cadastro = cria_df_dados_cadastro()
 
     # 2. Mercado + notícias

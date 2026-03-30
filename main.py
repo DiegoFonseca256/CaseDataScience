@@ -12,8 +12,7 @@ from database import get_conn, init_db
 
 load_dotenv()
 
-LISTA_TICKERS    = ["ASAI3", "RECV3", "MOVI3", "BRKM5", "HBSA3",
-                    "ITUB4", "BBDC4", "OPCT3", "BRSR6", "PRIO3"]
+LISTA_TICKERS    = ["ASAI3", "RECV3"]
 ARQUIVO_CADASTRO = "empresa_info_cadastro.txt"
 NEWS_API_KEY     = os.getenv("NEWS_API_KEY", "")
 
@@ -78,24 +77,36 @@ def salvar_snapshot_no_db(df):
         for _, row in df.iterrows():
             ticker = row['ticker']
             
-            cursor = conn.execute('''
-                INSERT INTO snapshots (
-                    ticker, data_coleta, preco_atual, pl, roe, dy, 
-                    market_cap, beta, resumo_llm, analise_llm, perguntas_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                ticker, 
-                agora, 
-                row.get('preco_atual'), 
-                row.get('P/L'), 
-                row.get('ROE'), 
-                row.get('dividendYield'),
-                row.get('market_cap'),
-                row.get('Beta'),
-                row.get('resumo_negocio'),
-                row.get('analise_fundamentos'),
-                row.get('perguntas_json')
-            ))
+            conn.execute('''
+                    INSERT INTO snapshots (
+                        ticker, data_coleta, preco_atual, variacao_dia, 
+                        debtToEquity, freeCashflow, ebitdaMargins, 
+                        LiquiCorrente, VolMedDiario, MargemOperacional, 
+                        min_52, max_52, pl, roe, dy, 
+                        market_cap, beta, resumo_llm, analise_llm, perguntas_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    ticker, 
+                    agora, 
+                    row.get('preco_atual'),
+                    row.get("variacao_dia"),
+                    row.get("debt_to_equity") or row.get("debtToEquity"), # Tenta os dois formatos
+                    row.get("free_cashflow") or row.get("freeCashflow"),
+                    row.get("ebitda_margins") or row.get("ebitdaMargins"),
+                    row.get("liquidez_corrente") or row.get("Liqui Corrente"), # Mapeia o nome com espaço para o sem espaço
+                    row.get("vol_medio_diario") or row.get("Vol Med Diário"),
+                    row.get("margem_operacional") or row.get("Margem Operacional"),
+                    row.get('min_52'),
+                    row.get('max_52'), 
+                    row.get('pl') or row.get('P/L'), 
+                    row.get('roe') or row.get('ROE'), 
+                    row.get('dividend_yield') or row.get('dividendYield'),
+                    row.get('market_cap'),
+                    row.get('beta') or row.get('Beta'),
+                    row.get('resumo_llm'), # Certifique-se que o merge gerou 'resumo_llm' e não 'resumo_negocio'
+                    row.get('analise_llm'),
+                    row.get('perguntas_json')
+                ))
             
             try:
                 noticias_brutas = json.loads(row.get('noticias_raw_json', '[]'))
@@ -106,14 +117,17 @@ def salvar_snapshot_no_db(df):
                 for noticia in noticias_brutas:
                     titulo = noticia.get('title')
                     url = noticia.get('url')
+                    descricao = noticia.get("description")
+                    fonte= noticia.get("source").get("name", "?")
                     data_noticia = noticia.get('publishedAt')
                     sentimento = mapa_sentimento.get(titulo, "neutra")
+                    imagem= noticia.get("urlToImage")
 
                     conn.execute('''
                         INSERT INTO noticias_historico (
-                            ticker, data_noticia, titulo, sentimento, url
-                        ) VALUES (?, ?, ?, ?, ?)
-                    ''', (ticker, data_noticia, titulo, sentimento, url))
+                            ticker, data_noticia, titulo, fonte, sentimento, url, imagem, descricao
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (ticker, data_noticia, titulo,fonte, sentimento, url, imagem, descricao))
             except Exception as e:
                 print(f"⚠️ Erro ao processar notícias para {ticker} no DB: {e}")
 
@@ -133,6 +147,7 @@ def busca_noticias(ticker_nome):
         f"https://newsapi.org/v2/everything"
         f"?q={ticker_nome}&language=pt&sortBy=publishedAt&apiKey={NEWS_API_KEY}"
     )
+
     try:
         response = requests.get(url, timeout=10).json()
         return response.get("articles", [])[:5]
@@ -145,7 +160,6 @@ def busca_noticias(ticker_nome):
 # Mercado — inclui preco_atual, variacao_dia e market_cap
 # ---------------------------------------------------------------------------
 
-def pegar_minima_52s(ticker):
     # 1. Tenta pelo campo pronto da API
     info = yf.Ticker(ticker + ".SA").info
     minima = info.get("fiftyTwoWeekLow")
@@ -167,13 +181,20 @@ def pega_dados_mercado(lista_tickers):
             info = yf.Ticker(ticker + ".SA").info
             noticias = busca_noticias(ticker)
 
+            max_52=info.get("fiftyTwoWeekHigh")
+            min_52=info.get("fiftyTwoWeekLow")
+            hist_1y = yf.Ticker(ticker + ".SA").history(period="1y")
+                
+            min_52 = hist_1y['Low'].min()
+            max_52 = hist_1y['High'].max()
+
             dados_ticker = {
                 "ticker":               ticker,
-                # ── Cotação e mercado ────────────────────────────────────────
+                
                 "preco_atual":          info.get("currentPrice"),
                 "variacao_dia":         info.get("regularMarketChangePercent"),
                 "market_cap":           info.get("marketCap"),
-                # ── Indicadores fundamentalistas ─────────────────────────────
+                
                 "P/L":                  info.get("trailingPE"),
                 "ROE":                  info.get("returnOnEquity"),
                 "debtToEquity":         info.get("debtToEquity"),
@@ -184,13 +205,14 @@ def pega_dados_mercado(lista_tickers):
                 "Liqui Corrente":       info.get("currentRatio"),
                 "Vol Med Diário":       info.get("averageVolume"),
                 "Margem Operacional":   info.get("operatingMargins"),
-                "Máxima 52 Semanas":    info.get("fiftyTwoWeekHigh"),
-                "Mínima 52 Semanas":    pegar_minima_52s(ticker),
-                # ── Notícias (lista de dicts da NewsAPI) ─────────────────────
+                "max_52":    max_52,
+                'min_52':    min_52,
+             
                 "noticias":             noticias,
             }
             novos_dados.append(dados_ticker)
             print(f"✅ Dados de {ticker} coletados.")
+        
 
         except Exception as e:
             print(f"❌ Erro ao coletar {ticker}: {e}")
@@ -221,13 +243,14 @@ def tratamento_dados(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def cria_df_final(lista_tickers):
-
+    
     # 1. Garante tabelas e atualiza dados estáticos das empresas
     init_db()
-    
+    salvar_empresas_no_db(lista_tickers)
     # 2. Coleta dados dinâmicos
     dados_mercado = pega_dados_mercado(lista_tickers)
     df_mercado = pd.DataFrame(dados_mercado)
+    print(df_mercado.head())
     
     # 3. Busca dados estáticos do banco para o Merge
     df_cadastro = cria_df_dados_cadastro()
@@ -236,13 +259,15 @@ def cria_df_final(lista_tickers):
     df_base = pd.merge(df_cadastro, df_mercado, on="ticker", how="left")
     df_tratado = tratamento_dados(df_base)
     
+    print(df_mercado[['ticker', 'min_52', 'max_52']].head())
     print(f"✔ {len(df_tratado)} ativos prontos para análise.")
 
     # Pausa de 1s para respeitar limites de taxa (Rate Limits) da API
-    df_relatorios = analisar_lote(df_tratado, pausa=1.0)
-
+    df_relatorios = analisar_lote(lista_tickers, pausa=1.0)
+    
     # 6. Merge final entre indicadores e as análises geradas
     df_completo = pd.merge(df_tratado, df_relatorios, on="ticker", how="left")
+    print(df_completo[['ticker', 'min_52', 'max_52']].head())
     
     # Validação rápida de integridade
     if 'analise_fundamentos' in df_completo.columns:
@@ -258,6 +283,7 @@ def cria_df_final(lista_tickers):
 if __name__ == "__main__":
 
     df_final= cria_df_final(LISTA_TICKERS)
+    
 
     # Serializamos as notícias para não perder os metadados (URL, Imagem)
     if "noticias" in df_final.columns:

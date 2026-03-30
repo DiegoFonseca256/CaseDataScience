@@ -56,6 +56,13 @@ def init_db():
                 ticker TEXT,
                 data_coleta TEXT,
                 preco_atual REAL,
+                variacao_dia REAL,
+                debtToEquity REAL,
+                freeCashflow REAL,
+                ebitdaMargins REAL,
+                LiquiCorrente REAL,
+                VolMedDiario REAL,
+                MargemOperacional REAL,
                 min_52 REAL,
                 max_52 REAL,
                 pl REAL,
@@ -65,8 +72,7 @@ def init_db():
                 beta REAL,
                 resumo_llm TEXT,
                 analise_llm TEXT,
-                perguntas_json TEXT,
-                FOREIGN KEY(ticker) REFERENCES empresas(ticker)
+                perguntas_json TEXT
             )
         ''')
         # Notícias
@@ -76,8 +82,11 @@ def init_db():
                 ticker TEXT,
                 data_noticia TEXT,
                 titulo TEXT,
+                fonte TEXT,
                 sentimento TEXT,
                 url TEXT,
+                imagem TEXT,
+                descricao TEXT,
                 FOREIGN KEY(ticker) REFERENCES empresas(ticker)
             )
         ''')

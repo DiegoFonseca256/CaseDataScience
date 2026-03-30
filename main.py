@@ -226,41 +226,57 @@ def tratamento_dados(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
+# ---------------------------------------------------------------------------
+# Criação do DataFrame
+# ---------------------------------------------------------------------------
+
+def cria_df_final(lista_tickers):
+
+    # 1. Garante tabelas e atualiza dados estáticos das empresas
+    init_db()
+    salvar_empresas_no_db(lista_tickers)
+    
+    # 2. Coleta dados dinâmicos
+    dados_mercado = pega_dados_mercado(lista_tickers)
+    df_mercado = pd.DataFrame(dados_mercado)
+    
+    # 3. Busca dados estáticos do banco para o Merge
+    df_cadastro = cria_df_dados_cadastro()
+
+    # 4. Une as bases e aplica conversões numéricas
+    df_base = pd.merge(df_cadastro, df_mercado, on="ticker", how="left")
+    df_tratado = tratamento_dados(df_base)
+    
+    print(f"✔ {len(df_tratado)} ativos prontos para análise.")
+
+    # Pausa de 1s para respeitar limites de taxa (Rate Limits) da API
+    df_relatorios = analisar_lote(df_tratado, pausa=1.0)
+
+    # 6. Merge final entre indicadores e as análises geradas
+    df_completo = pd.merge(df_tratado, df_relatorios, on="ticker", how="left")
+    
+    # Validação rápida de integridade
+    if 'analise_fundamentos' in df_completo.columns:
+        sucessos = df_completo['analise_fundamentos'].notna().sum()
+        print(f"✔ Pipeline concluído: {sucessos}/{len(lista_tickers)} análises geradas.")
+    
+    return df_completo
 
 # ---------------------------------------------------------------------------
-# Pipeline principal
+# Pipeline
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
 
-    # 1. Cadastro
-    salvar_empresas_no_db(LISTA_TICKERS)
-    df_cadastro = cria_df_dados_cadastro()
+    df_final= cria_df_final(LISTA_TICKERS)
 
-    # 2. Mercado + notícias
-    df_mercado = pd.DataFrame(pega_dados_mercado(LISTA_TICKERS))
-
-    # 3. Merge
-    df_final = pd.merge(df_cadastro, df_mercado, on="ticker", how="left")
-
-    # 4. Tratamento
-    df_final = tratamento_dados(df_final)
-    print(df_final[["ticker", "preco_atual", "variacao_dia", "market_cap", "P/L"]].head())
-
-    # 5. Análise LLM — usa analyst.py
-    print("\n=== Gerando análises com LLM ===")
-    df_relatorios = analisar_lote(df_final, pausa=1.0)
-
-    # 6. Merge com relatórios
-    df_completo = pd.merge(df_final, df_relatorios, on="ticker", how="left")
-
-    # 7. Serializa notícias brutas como JSON string para o dashboard usar urlToImage e url
-    if "noticias" in df_completo.columns:
-        df_completo["noticias_raw_json"] = df_completo["noticias"].apply(
+    # Serializamos as notícias para não perder os metadados (URL, Imagem)
+    if "noticias" in df_final.columns:
+        df_final["noticias_raw_json"] = df_final["noticias"].apply(
             lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else "[]"
         )
-        df_completo.drop(columns=["noticias"], inplace=True)
 
-    # 8. Salva
-    df_completo.to_csv("empresas_com_analise.csv", index=False, encoding="utf-8")
-    print("\n✅ Concluído. Resultado em: empresas_com_analise.csv")
+    # Persistência final
+    print("\n=== Gravando Snapshot Histórico no DB ===")
+    salvar_snapshot_no_db(df_final)
+    print("\n🚀 Processo concluído 🚀")

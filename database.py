@@ -90,3 +90,82 @@ def init_db():
                 FOREIGN KEY(ticker) REFERENCES empresas(ticker)
             )
         ''')
+        # Portfolio — lista de tickers ativos para o pipeline
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio (
+                ticker        TEXT PRIMARY KEY,
+                adicionado_em TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                ativo         INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+
+# ---------------------------------------------------------------------------
+# Funções de gerenciamento do portfólio
+# ---------------------------------------------------------------------------
+
+def listar_portfolio() -> list:
+    """Retorna a lista de tickers ativos no portfólio."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT ticker FROM portfolio WHERE ativo = 1 ORDER BY ticker"
+        ).fetchall()
+    return [r["ticker"] for r in rows]
+
+
+def adicionar_ticker(ticker: str) -> tuple:
+    """
+    Adiciona um ticker ao portfólio.
+    Retorna (sucesso: bool, mensagem: str).
+    """
+    ticker = ticker.upper().strip()
+
+    if not ticker or len(ticker) < 4 or len(ticker) > 6:
+        return False, f"Ticker '{ticker}' inválido — deve ter entre 4 e 6 caracteres."
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT ativo FROM portfolio WHERE ticker = ?", (ticker,)
+        ).fetchone()
+
+        if row:
+            if row["ativo"] == 1:
+                return False, f"**{ticker}** já está no portfólio."
+            else:
+                conn.execute(
+                    "UPDATE portfolio SET ativo = 1, adicionado_em = datetime('now') WHERE ticker = ?",
+                    (ticker,)
+                )
+                return True, f"**{ticker}** reativado no portfólio."
+        else:
+            conn.execute("INSERT INTO portfolio (ticker) VALUES (?)", (ticker,))
+            return True, f"**{ticker}** adicionado ao portfólio."
+
+
+def remover_ticker(ticker: str) -> tuple:
+    """
+    Remove (desativa) um ticker do portfólio.
+    Não apaga dados históricos — apenas marca como inativo.
+    Retorna (sucesso: bool, mensagem: str).
+    """
+    ticker = ticker.upper().strip()
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT ativo FROM portfolio WHERE ticker = ?", (ticker,)
+        ).fetchone()
+
+        if not row or row["ativo"] == 0:
+            return False, f"**{ticker}** não está no portfólio."
+
+        conn.execute("UPDATE portfolio SET ativo = 0 WHERE ticker = ?", (ticker,))
+
+    return True, f"**{ticker}** removido. Dados históricos preservados."
+
+
+def ticker_tem_dados(ticker: str) -> bool:
+    """Verifica se o ticker já tem snapshots no banco."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as n FROM snapshots WHERE ticker = ?", (ticker,)
+        ).fetchone()
+    return row["n"] > 0

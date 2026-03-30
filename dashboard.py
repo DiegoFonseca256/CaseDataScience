@@ -20,7 +20,10 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 from LLM import _fmt, _fmt_grande, _variacao_fmt
-from database import get_conn, init_db
+from database import (
+    get_conn, init_db,
+    listar_portfolio, adicionar_ticker, remover_ticker, ticker_tem_dados,
+)
 
 load_dotenv()
 
@@ -127,7 +130,61 @@ with st.sidebar:
     st.caption("Painel de Análise Fundamentalista")
     st.divider()
 
+    # --- Seleção de ticker para visualização ---
     ticker = st.selectbox("Ticker", df["ticker"].unique())
+
+    st.divider()
+
+    # --- Gerenciamento do portfólio ---
+    st.markdown("**⚙️ Portfólio**")
+
+    # Adicionar ticker
+    novo_ticker = st.text_input(
+        "Adicionar ticker",
+        placeholder="Ex: VALE3",
+        max_chars=6,
+        label_visibility="collapsed",
+    ).upper().strip()
+
+    if st.button("➕ Adicionar", use_container_width=True, disabled=not novo_ticker):
+        sucesso, msg = adicionar_ticker(novo_ticker)
+        if sucesso:
+            st.success(msg)
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error(msg)
+
+    # Remover ticker
+    portfolio_atual = listar_portfolio()
+    ticker_remover = st.selectbox(
+        "Remover ticker",
+        options=["— selecione —"] + portfolio_atual,
+        label_visibility="collapsed",
+    )
+
+    if st.button(
+        "🗑️ Remover do portfólio",
+        use_container_width=True,
+        disabled=(ticker_remover == "— selecione —"),
+        type="secondary",
+    ):
+        sucesso, msg = remover_ticker(ticker_remover)
+        if sucesso:
+            st.warning(msg)
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error(msg)
+
+    # Lista atual do portfólio
+    with st.expander(f"📋 Portfólio ({len(portfolio_atual)} tickers)"):
+        if portfolio_atual:
+            for t in portfolio_atual:
+                tem_dados = ticker_tem_dados(t)
+                st.caption(f"{'✅' if tem_dados else '⏳'} {t}")
+        else:
+            st.caption("Portfólio vazio.")
 
     st.divider()
     if st.button("🔄 Recarregar dados", use_container_width=True):
@@ -174,7 +231,7 @@ c2.metric("P/L",           _fmt(linha.get("pl"), sufixo="x"))
 c3.metric("ROE",           _fmt(linha.get("roe"), sufixo="%"))
 c4.metric("Div. Yield",    _fmt(linha.get("dy"), sufixo="%"))
 c5.metric("Dívida/Equity", _fmt(linha.get("debtToEquity"), sufixo="x"))
-c6.metric("Beta",          _fmt(linha.get("Beta")))
+c6.metric("Beta",          _fmt(linha.get("beta")))
 
 with st.expander("📐 Todos os indicadores"):
     ca, cb = st.columns(2)

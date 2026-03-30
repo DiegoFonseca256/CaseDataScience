@@ -8,7 +8,7 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 from LLM import analisar_lote
-from database import get_conn, init_db
+from database import get_conn, init_db, listar_portfolio, adicionar_ticker
 
 load_dotenv()
 
@@ -282,7 +282,19 @@ def cria_df_final(lista_tickers):
 
 if __name__ == "__main__":
 
-    df_final= cria_df_final(LISTA_TICKERS)
+    # Lê a lista do banco se existir, senão usa a lista do código
+    init_db()
+    lista_banco = listar_portfolio()
+    tickers_para_rodar = lista_banco if lista_banco else LISTA_TICKERS
+
+    # Popula o portfólio com a lista do código na primeira execução
+    if not lista_banco:
+        for t in LISTA_TICKERS:
+            adicionar_ticker(t)
+        print(f"✅ Portfólio inicializado com {len(LISTA_TICKERS)} tickers.")
+
+    print(f"=== Pipeline: {tickers_para_rodar} ===")
+    df_final = cria_df_final(tickers_para_rodar)
     
 
     # Serializamos as notícias para não perder os metadados (URL, Imagem)

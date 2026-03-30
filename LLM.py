@@ -250,66 +250,76 @@ def _chamar_groq(prompt: str) -> str:
 # Funções públicas
 # ---------------------------------------------------------------------------
 
-#Gera relatorio para uma linha do df_final
-def analisar_empresa(linha: pd.Series) -> dict:
-
-    ticker = linha.get("ticker", "?")
-
+def analisar_empresa(ticker: str) -> dict:
+    
     if not GROQ_API_KEY:
         print(f"⚠️  [{ticker}] GROQ_API_KEY não configurada.")
-        print("     Obtenha gratuitamente em: https://console.groq.com")
         return {"erro": "GROQ_API_KEY ausente", "ticker": ticker}
 
-    prompt = construir_prompt(linha)
-    print(f"🤖 [{ticker}] Enviando para Groq ({LLM_MODEL})...")
 
     try:
-        relatorio = _chamar_groq(prompt)
+        prompt = construir_prompt(ticker)
+    except Exception as e:
+        print(f"❌ [{ticker}] Erro ao buscar dados no DB: {e}")
+        return {"erro": "dados_nao_encontrados", "ticker": ticker}
+
+    print(f"🤖 [{ticker}] Enviando para Groq ({LLM_MODEL})...")
+
+    # 2. Chamada ao LLM com lógica de Rate Limit integrada
+    try:
+        relatorio_bruto = _chamar_groq(prompt)
     except Exception as exc:
         msg = str(exc)
+
         if "429" in msg or "rate_limit" in msg.lower():
             espera = _extrair_retry_delay(exc)
-            print(f"⏳ [{ticker}] Rate limit. Aguardando {espera:.0f}s...")
+            print(f"⏳ [{ticker}] Rate limit atingido. Aguardando {espera:.0f}s...")
             time.sleep(espera)
+
             try:
-                relatorio = _chamar_groq(prompt)
+                relatorio_bruto = _chamar_groq(prompt)
             except Exception as exc2:
-                print(f"❌ [{ticker}] Falhou após aguardar: {exc2}")
-                return {"erro": str(exc2), "ticker": ticker}
+                return {"erro": f"Falha pós-espera: {exc2}", "ticker": ticker}
+            
         else:
             print(f"❌ [{ticker}] Groq falhou: {exc}")
             return {"erro": str(exc), "ticker": ticker}
 
-    relatorio_limpo = _extrair_json(relatorio)
+    # 3. Limpeza e Validação do JSON retornado pela IA
+    relatorio_limpo = _extrair_json(relatorio_bruto)
 
     if not relatorio_limpo.rstrip().endswith("}"):
-        print(f"❌ [{ticker}] Resposta truncada: ...{relatorio_limpo[-80:]}")
-        return {"erro": "resposta truncada", "ticker": ticker}
+        print(f"❌ [{ticker}] Resposta da IA veio incompleta (truncada).")
+        return {"erro": "resposta_truncada", "ticker": ticker}
 
     try:
         data = json.loads(relatorio_limpo)
+        data["ticker"] = ticker
+        print(f"✅ [{ticker}] Relatório de fundamentos gerado com sucesso.")
+        return data
     except json.JSONDecodeError as exc:
-        print(f"❌ [{ticker}] JSON inválido: {exc} | trecho: {relatorio_limpo[:200]}")
-        return {"erro": "JSON inválido", "ticker": ticker}
-
-    data["ticker"] = ticker
-    print(f"✅ [{ticker}] Relatório gerado.")
-    return data
+        print(f"❌ [{ticker}] IA não retornou um JSON válido.")
+        return {"erro": "json_invalido", "ticker": ticker}
 
 # Processa o df_final inteiro e retorna DataFrame com relatórios.
-def analisar_lote(df: pd.DataFrame, pausa: float = 2.0) -> pd.DataFrame:
-
+def analisar_lote   (lista_tickers: list, pausa: float = 2.0) -> pd.DataFrame:
     relatorios = []
-    for _, linha in df.iterrows():
-        rel = analisar_empresa(linha)
+    
+    for ticker in lista_tickers:
+
+        rel = analisar_empresa(ticker)
+        
         relatorios.append({
-            "ticker":              rel.get("ticker", ""),
-            "resumo_negocio":      rel.get("resumo_negocio", ""),
-            "analise_fundamentos": rel.get("analise_fundamentos", ""),
-            "noticias_json":       json.dumps(rel.get("noticias", {}),ensure_ascii=False),
-            "sentimentos_json":    json.dumps(rel.get("sentimentos", {}),ensure_ascii=False),
-            "perguntas_json":      json.dumps(rel.get("perguntas_analista", []),ensure_ascii=False),
+            "ticker":              ticker,
+            "resumo_llm":          rel.get("resumo_negocio", ""),
+            "analise_llm":         rel.get("analise_fundamentos", ""),
+            "noticias_json":       json.dumps(rel.get("noticias", []), ensure_ascii=False),
+            "perguntas_json":      json.dumps(rel.get("perguntas_analista", []), ensure_ascii=False),
             "erro":                rel.get("erro", ""),
         })
-        time.sleep(pausa)
+        
+        # Respeita o limite de taxa (Rate Limit) da API do Groq 
+        if pausa > 0:
+            time.sleep(pausa)
+            
     return pd.DataFrame(relatorios)

@@ -9,6 +9,8 @@ import pandas as pd
 from groq import Groq
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from database import get_conn, init_db
+
 # ---------------------------------------------------------------------------
 # Configuração
 # ---------------------------------------------------------------------------
@@ -141,47 +143,71 @@ def _extrair_json(texto: str) -> str:
 # CAMADA 2 — User prompt compacto
 # ---------------------------------------------------------------------------
 
-def construir_prompt(linha: pd.Series) -> str:
-    preco  = linha.get("preco_atual")
-    min_52 = linha.get("Mínima 52 Semanas")
-    max_52 = linha.get("Máxima 52 Semanas")
-    pos_52s = "N/D"
-    if all(v is not None and not pd.isna(v) for v in [preco, min_52, max_52]):
-        try:
-            rng = float(max_52) - float(min_52)
-            if rng > 0:
-                pos_52s = f"{(float(preco) - float(min_52)) / rng * 100:.0f}% do range"
-        except (TypeError, ValueError):
-            pass
+def construir_prompt(ticker: str) -> str:
+    with get_conn() as conn:
+        # 1. Busca dados estáticos e o snapshot mais recente
+        query = '''
+            SELECT e.*, s.*
+            FROM empresas e
+            JOIN snapshots s ON e.ticker = s.ticker
+            WHERE e.ticker = ?
+            ORDER BY s.data_coleta DESC
+            LIMIT 1
+        '''
+        dados = conn.execute(query, (ticker,)).fetchone()
+        
+        if not dados:
+            return f"Erro: Dados não encontrados para o ticker {ticker}."
 
-    # Só envia indicadores com valor real — evita tokens desperdiçados com N/D
+        preco=dados["preco_atual"]
+        min_52=dados["min_52"]
+        max_52=dados["max_52"]
+        pos_52s = "N/D"
+
+        if all(v is not None and not pd.isna(v) for v in [preco, min_52, max_52]):
+            try:
+                rng = float(max_52) - float(min_52)
+                if rng > 0:
+                    percentual = (float(preco) - float(min_52)) / rng * 100
+                    pos_52s = f"{percentual:.0f}% do range"
+            except (TypeError, ValueError):
+                pass
+
+        # 2. Busca as notícias vinculadas a esse ticker
+        query_noticias = '''
+            SELECT titulo, sentimento 
+            FROM noticias_historico 
+            WHERE ticker = ? 
+            ORDER BY id DESC LIMIT 5
+        '''
+        noticias = conn.execute(query_noticias, (ticker,)).fetchall()
+        noticias_str = "\n".join([f"- {n['titulo']} (Sentimento: {n['sentimento']})" for n in noticias])
+
     ind = {
-        "P/L":        _fmt(linha.get("P/L"), "x"),
-        "ROE":        _fmt(linha.get("ROE"), "%"),
-        "Div/Eq":     _fmt(linha.get("debtToEquity"), "x"),
-        "DY":         _fmt(linha.get("dividendYield"), "%"),
-        "FCF":        _fmt_grande(linha.get("freeCashflow")),
-        "Mrg.EBITDA": _fmt(linha.get("ebitdaMargins"), "%"),
-        "Mrg.Oper":   _fmt(linha.get("Margem Operacional"), "%"),
-        "Liq.Corr":   _fmt(linha.get("Liqui Corrente"), "x"),
+        "P/L":         _fmt(dados['pl'], "x"),
+        "ROE":        _fmt(dados['roe'], "%"),
+        "DY":         _fmt(dados['dy'], "%"),
+        "M.Cap":      _fmt_grande(dados['market_cap']),
+        "Beta":       _fmt(dados['beta'])
     }
     ind_str = " | ".join(f"{k}:{v}" for k, v in ind.items() if v != "N/D")
 
     return (
-        f"Empresa: {linha.get('ticker')} | {linha.get('nome')} | {linha.get('setor')}\n"
-        f"Negócio: {str(linha.get('descricao', ''))[:300]}\n"
-        f"Cotação: R${_fmt(preco)} {_variacao_fmt(linha.get('variacao_dia'))} | "
-        f"MCap:{_fmt_grande(linha.get('market_cap'))} | Beta:{_fmt(linha.get('Beta'))} | Range52s:{pos_52s}\n"
-        f"Fundamentos: {ind_str}\n"
-        f"Notícias:\n{_formatar_noticias(linha.get('noticias'))}\n\n"
-        f"Retorne APENAS este JSON preenchido:\n"
-        f'{{"resumo_negocio":"2-3 frases sobre modelo de negócio e geração de valor",'
-        f'"analise_fundamentos":"interpretação dos indicadores em conjunto — qualidade, risco e momento",'
-        f'Retorne as notícias analisadas neste formato: '
-        f'"noticias": ['
-        f'  {{"titulo": "título original da notícia", "sentimento": "positiva/negativa/neutra"}}'
-        f']'
-        f'"perguntas_analista":["pergunta1","pergunta2","pergunta3"]}}'
+        f"CONTEXTO: Você é o analista-chefe da Hipótese Capital.\n"
+        f"ATIVO: {dados['ticker']} | {dados['nome']} | {dados['setor']}\n"
+        f"MODELO DE NEGÓCIO: {str(dados['descricao'])[:400]}\n"
+        f"MERCADO: Preço R${_fmt(dados['preco_atual'])} | MCap: {ind['M.Cap']} | Beta: {ind['Beta']}Range52s: {pos_52s}\n"
+        f"FUNDAMENTOS: {ind_str}\n"
+        f"NOTÍCIAS RECENTES:\n{noticias_str}\n\n"
+        f"TAREFA: Retorne APENAS um JSON com este formato estrito:\n"
+        f"{{\n"
+        f'  "resumo_negocio": "2-3 frases sobre o modelo e geração de valor",\n'
+        f'  "analise_fundamentos": "análise qualitativa dos indicadores e momento",\n'
+        f'  "noticias": [\n'
+        f'    {{"titulo": "título da notícia", "sentimento": "positiva/negativa/neutra"}}\n'
+        f'  ],\n'
+        f'  "perguntas_analista": ["pergunta1", "pergunta2", "pergunta3"]\n'
+        f"}}"
     )
 
 

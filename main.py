@@ -1,16 +1,6 @@
-"""
-main.py
-Coleta dados de mercado, notícias e gera análise com LLM.
-
-Novos campos adicionados:
-  - preco_atual      → currentPrice
-  - variacao_dia     → regularMarketChangePercent
-  - market_cap       → marketCap
-"""
-import io
 import json
 import os
-import datetime
+from datetime import datetime
 
 import pandas as pd
 import requests
@@ -234,7 +224,6 @@ def cria_df_final(lista_tickers):
 
     # 1. Garante tabelas e atualiza dados estáticos das empresas
     init_db()
-    salvar_empresas_no_db(lista_tickers)
     
     # 2. Coleta dados dinâmicos
     dados_mercado = pega_dados_mercado(lista_tickers)

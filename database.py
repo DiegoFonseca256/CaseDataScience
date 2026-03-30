@@ -56,6 +56,8 @@ def init_db():
                 ticker TEXT,
                 data_coleta TEXT,
                 preco_atual REAL,
+                min_52 REAL,
+                max_52 REAL,
                 pl REAL,
                 roe REAL,
                 dy REAL,

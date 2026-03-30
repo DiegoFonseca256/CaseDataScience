@@ -10,7 +10,7 @@ Novos campos adicionados:
 import io
 import json
 import os
-import time
+import datetime
 
 import pandas as pd
 import requests
@@ -29,7 +29,7 @@ NEWS_API_KEY     = os.getenv("NEWS_API_KEY", "")
 
 
 # ---------------------------------------------------------------------------
-# Cadastro
+# Data Base
 # ---------------------------------------------------------------------------
 
 def salvar_empresas_no_db(lista_tickers):
@@ -79,6 +79,55 @@ def cria_df_dados_cadastro():
     except Exception as e:
         print(f"❌ Erro ao ler dados de cadastro do banco: {e}")
         return pd.DataFrame() # Retorna um DF vazio para não quebrar o pipeline
+    
+def salvar_snapshot_no_db(df):
+
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    with get_conn() as conn:
+        for _, row in df.iterrows():
+            ticker = row['ticker']
+            
+            cursor = conn.execute('''
+                INSERT INTO snapshots (
+                    ticker, data_coleta, preco_atual, pl, roe, dy, 
+                    market_cap, beta, resumo_llm, analise_llm, perguntas_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                ticker, 
+                agora, 
+                row.get('preco_atual'), 
+                row.get('P/L'), 
+                row.get('ROE'), 
+                row.get('dividendYield'),
+                row.get('market_cap'),
+                row.get('Beta'),
+                row.get('resumo_negocio'),
+                row.get('analise_fundamentos'),
+                row.get('perguntas_json')
+            ))
+            
+            try:
+                noticias_brutas = json.loads(row.get('noticias_raw_json', '[]'))
+                sentimentos_ia = json.loads(row.get('noticias_json', '[]'))
+                
+                mapa_sentimento = {item['titulo']: item['sentimento'] for item in sentimentos_ia if 'titulo' in item}
+
+                for noticia in noticias_brutas:
+                    titulo = noticia.get('title')
+                    url = noticia.get('url')
+                    data_noticia = noticia.get('publishedAt')
+                    sentimento = mapa_sentimento.get(titulo, "neutra")
+
+                    conn.execute('''
+                        INSERT INTO noticias_historico (
+                            ticker, data_noticia, titulo, sentimento, url
+                        ) VALUES (?, ?, ?, ?, ?)
+                    ''', (ticker, data_noticia, titulo, sentimento, url))
+            except Exception as e:
+                print(f"⚠️ Erro ao processar notícias para {ticker} no DB: {e}")
+
+    print(f"✅ Snapshot e notícias de {len(df)} tickers salvos com sucesso.")
 
 
 # ---------------------------------------------------------------------------

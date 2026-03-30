@@ -5,11 +5,17 @@ import os
 import re
 import time
 
+import logging
 import pandas as pd
 from groq import Groq
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from database import get_conn, init_db
+
+# ---------------------------------------------------------------------------
+# Configuração de Logging
+# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -225,15 +231,12 @@ def _extrair_retry_delay(exc: Exception) -> float:
         pass
     return 30.0
 
-
 @retry(
     stop=stop_after_attempt(LLM_RETRIES),
     wait=wait_exponential(multiplier=1, min=2, max=15),
     reraise=True,
 )
-# Chama o Groq via SDK oficial
 def _chamar_groq(prompt: str) -> str:
-
     response = client.chat.completions.create(
         model=LLM_MODEL,
         messages=[
@@ -245,68 +248,60 @@ def _chamar_groq(prompt: str) -> str:
     )
     return response.choices[0].message.content
 
-
 # ---------------------------------------------------------------------------
 # Funções públicas
 # ---------------------------------------------------------------------------
 
 def analisar_empresa(ticker: str) -> dict:
-    
     if not GROQ_API_KEY:
-        print(f"⚠️  [{ticker}] GROQ_API_KEY não configurada.")
+        logger.warning(f"[{ticker}] GROQ_API_KEY não configurada.")
         return {"erro": "GROQ_API_KEY ausente", "ticker": ticker}
-
 
     try:
         prompt = construir_prompt(ticker)
     except Exception as e:
-        print(f"❌ [{ticker}] Erro ao buscar dados no DB: {e}")
+        logger.error(f"[{ticker}] Erro ao buscar dados no DB: {e}")
         return {"erro": "dados_nao_encontrados", "ticker": ticker}
 
-    print(f"🤖 [{ticker}] Enviando para Groq ({LLM_MODEL})...")
+    logger.info(f"[{ticker}] Enviando para Groq ({LLM_MODEL})...")
 
-    # 2. Chamada ao LLM com lógica de Rate Limit integrada
     try:
         relatorio_bruto = _chamar_groq(prompt)
     except Exception as exc:
         msg = str(exc)
-
         if "429" in msg or "rate_limit" in msg.lower():
             espera = _extrair_retry_delay(exc)
-            print(f"⏳ [{ticker}] Rate limit atingido. Aguardando {espera:.0f}s...")
+            logger.warning(f"[{ticker}] Rate limit atingido. Aguardando {espera:.0f}s...")
             time.sleep(espera)
-
             try:
                 relatorio_bruto = _chamar_groq(prompt)
             except Exception as exc2:
+                logger.error(f"[{ticker}] Falha fatal pós-espera: {exc2}")
                 return {"erro": f"Falha pós-espera: {exc2}", "ticker": ticker}
-            
         else:
-            print(f"❌ [{ticker}] Groq falhou: {exc}")
+            logger.error(f"[{ticker}] Groq falhou: {exc}")
             return {"erro": str(exc), "ticker": ticker}
 
-    # 3. Limpeza e Validação do JSON retornado pela IA
     relatorio_limpo = _extrair_json(relatorio_bruto)
 
     if not relatorio_limpo.rstrip().endswith("}"):
-        print(f"❌ [{ticker}] Resposta da IA veio incompleta (truncada).")
+        logger.error(f"[{ticker}] Resposta da IA veio incompleta (truncada).")
         return {"erro": "resposta_truncada", "ticker": ticker}
 
     try:
         data = json.loads(relatorio_limpo)
         data["ticker"] = ticker
-        print(f"✅ [{ticker}] Relatório de fundamentos gerado com sucesso.")
+        logger.info(f"[{ticker}] Relatório de fundamentos gerado com sucesso.")
         return data
     except json.JSONDecodeError as exc:
-        print(f"❌ [{ticker}] IA não retornou um JSON válido.")
+        logger.error(f"[{ticker}] IA não retornou um JSON válido: {exc}")
         return {"erro": "json_invalido", "ticker": ticker}
 
-# Processa o df_final inteiro e retorna DataFrame com relatórios.
-def analisar_lote   (lista_tickers: list, pausa: float = 2.0) -> pd.DataFrame:
+def analisar_lote(lista_tickers: list, pausa: float = 2.0) -> pd.DataFrame:
     relatorios = []
+    logger.info(f"Iniciando lote de análise para {len(lista_tickers)} ativos.")
     
     for ticker in lista_tickers:
-
         rel = analisar_empresa(ticker)
         
         relatorios.append({
@@ -318,8 +313,7 @@ def analisar_lote   (lista_tickers: list, pausa: float = 2.0) -> pd.DataFrame:
             "erro":                rel.get("erro", ""),
         })
         
-        # Respeita o limite de taxa (Rate Limit) da API do Groq 
-        if pausa > 0:
+        if pausa > 0 and ticker != lista_tickers[-1]:
             time.sleep(pausa)
             
     return pd.DataFrame(relatorios)

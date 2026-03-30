@@ -15,8 +15,8 @@ Garantias:
 """
 
 import sqlite3
+import os
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path("hipotese_capital.db")
@@ -90,3 +90,18 @@ def init_db():
                 FOREIGN KEY(ticker) REFERENCES empresas(ticker)
             )
         ''')
+
+def adicionar_ticker_ao_txt(ticker, arquivo="pendentes.txt"):
+    ticker = ticker.upper().strip()
+    if ticker:
+        with open(arquivo, "a") as f:
+            f.write(f"{ticker}\n")
+        return True
+    return False
+
+def ler_tickers_do_txt(arquivo="pendentes.txt"):
+    if not os.path.exists(arquivo):
+        return []
+    with open(arquivo, "r") as f:
+        # Lê, remove espaços e ignora linhas vazias
+        return [linha.strip() for linha in f.readlines() if linha.strip()]

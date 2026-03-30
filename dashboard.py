@@ -20,7 +20,7 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 from LLM import _fmt, _fmt_grande, _variacao_fmt
-from database import get_conn, init_db
+from database import get_conn, init_db, adicionar_ticker_ao_txt
 
 load_dotenv()
 
@@ -128,6 +128,18 @@ with st.sidebar:
     st.divider()
 
     ticker = st.selectbox("Ticker", df["ticker"].unique())
+    st.divider()
+
+    st.sidebar.subheader("📌 Agendar Nova Análise")
+    novo_ticker_pendente = st.sidebar.text_input("Ticker para a fila (ex: VALE3):").upper().strip()
+
+    if st.sidebar.button("Adicionar à Fila (.txt)"):
+        if novo_ticker_pendente:
+            from database import adicionar_ticker_ao_txt
+            adicionar_ticker_ao_txt(novo_ticker_pendente)
+            st.sidebar.success(f"{novo_ticker_pendente} adicionado ao pendentes.txt")
+        else:
+            st.sidebar.error("Digite um ticker válido.")
 
     st.divider()
     if st.button("🔄 Recarregar dados", use_container_width=True):
@@ -174,7 +186,7 @@ c2.metric("P/L",           _fmt(linha.get("pl"), sufixo="x"))
 c3.metric("ROE",           _fmt(linha.get("roe"), sufixo="%"))
 c4.metric("Div. Yield",    _fmt(linha.get("dy"), sufixo="%"))
 c5.metric("Dívida/Equity", _fmt(linha.get("debtToEquity"), sufixo="x"))
-c6.metric("Beta",          _fmt(linha.get("Beta")))
+c6.metric("Beta",          _fmt(linha.get("beta")))
 
 with st.expander("📐 Todos os indicadores"):
     ca, cb = st.columns(2)

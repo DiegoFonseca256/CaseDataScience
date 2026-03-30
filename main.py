@@ -8,18 +8,21 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 from LLM import analisar_lote
-from database import get_conn, init_db
+from database import get_conn, init_db,ler_tickers_do_txt
 
 load_dotenv()
 
-LISTA_TICKERS    = ["ASAI3", "RECV3"]
-ARQUIVO_CADASTRO = "empresa_info_cadastro.txt"
 NEWS_API_KEY     = os.getenv("NEWS_API_KEY", "")
 
 
 # ---------------------------------------------------------------------------
 # Data Base
 # ---------------------------------------------------------------------------
+
+def listar_tickers():
+    with get_conn() as conn:
+        cursor = conn.execute("SELECT ticker FROM empresas")
+        return [row[0] for row in cursor.fetchall()]
 
 def salvar_empresas_no_db(lista_tickers):
 
@@ -160,18 +163,6 @@ def busca_noticias(ticker_nome):
 # Mercado — inclui preco_atual, variacao_dia e market_cap
 # ---------------------------------------------------------------------------
 
-    # 1. Tenta pelo campo pronto da API
-    info = yf.Ticker(ticker + ".SA").info
-    minima = info.get("fiftyTwoWeekLow")
-    
-    # 2. Se vier 0, None ou NaN, calculamos manualmente pelo histórico
-    if not minima or minima == 0:
-        # Pega o histórico do último 1 ano (1y)
-        hist = yf.Ticker(ticker + ".SA").history(period="1y")
-        if not hist.empty:
-            minima = hist['Low'].min() # Pega o menor valor da coluna 'Low'
-            
-    return minima
 
 def pega_dados_mercado(lista_tickers):
     novos_dados = []
@@ -281,17 +272,25 @@ def cria_df_final(lista_tickers):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-
-    df_final= cria_df_final(LISTA_TICKERS)
+    init_db()
     
-
-    # Serializamos as notícias para não perder os metadados (URL, Imagem)
-    if "noticias" in df_final.columns:
-        df_final["noticias_raw_json"] = df_final["noticias"].apply(
-            lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else "[]"
-        )
-
-    # Persistência final
-    print("\n=== Gravando Snapshot Histórico no DB ===")
-    salvar_snapshot_no_db(df_final)
-    print("\n🚀 Processo concluído 🚀")
+    # 1. Carrega o que já está no banco
+    tickers_base = listar_tickers()
+    
+    # 2. Carrega o que você adicionou pelo Dashboard (o TXT)
+    tickers_novos = ler_tickers_do_txt("pendentes.txt")
+    
+    # 3. Une tudo em uma lista única (sem duplicados)
+    LISTA_FINAL = list(set(tickers_base + tickers_novos))
+    
+    if not LISTA_FINAL:
+        print("Nenhum ticker para processar.")
+    else:
+        print(f"=== Processando: {LISTA_FINAL} ===")
+        df_final = cria_df_final(LISTA_FINAL)
+        salvar_snapshot_no_db(df_final)
+        
+        # Opcional: Limpar o TXT após processar com sucesso
+        if tickers_novos:
+            open("pendentes.txt", "w").close() 
+            print("✅ Fila de pendentes limpa.")

@@ -5,3 +5,6 @@ python-dotenv
 groq
 tenacity
 logging
+streamlit
+plotly
+sqlite3

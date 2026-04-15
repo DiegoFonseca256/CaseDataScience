@@ -1,68 +1,71 @@
-📊 Hipótese Capital
-O Hipótese Capital é uma ferramenta de inteligência de mercado focada em análise fundamentalista de ações da B3. O sistema automatiza a coleta de indicadores financeiros, notícias e gera análises profundas utilizando Inteligência Artificial (LLMs via Groq), permitindo que você tome decisões baseadas em dados consolidados.
+# Hipótese Capital
 
-🚀 Fluxo de Trabalho
-O sistema utiliza um banco de dados SQLite para separar o que é dado estático (cadastro da empresa) do que é dinâmico (snapshots de mercado e análises da IA).
+Plataforma de análise fundamentalista de ações listadas na B3, com geração de relatórios assistidos por LLM e dashboard interativo.
 
-🛠️ Arquitetura
-CharlesRiver/
+## Visão Geral
 
-├── .env                # Chaves de API (não versionar)
+O projeto automatiza o fluxo completo de pesquisa de ações — da coleta de dados à geração de análise qualitativa — em três etapas:
 
-├── .gitignore          # Filtros do Git
+1. **Coleta de dados** — Indicadores fundamentalistas (P/L, ROE, Dividend Yield, Beta, etc.), dados cadastrais e notícias relevantes são obtidos via `yfinance` e `NewsAPI`.
+2. **Análise com LLM** — Um modelo rodado na Groq (Llama 3) recebe os dados estruturados e produz um relatório com avaliação do negócio, interpretação dos indicadores, classificação de sentimento das notícias e perguntas para investigação adicional.
+3. **Dashboard interativo** — Interface Streamlit com métricas, gráficos de preço históricos, cards de notícias com imagens e análise da IA consolidada.
 
-├── dashboard.py        # Interface visual (Streamlit)
+## Arquitetura
 
-├── database.py         # Camada de persistência (SQLite)
+| Módulo | Responsabilidade |
+|---|---|
+| `main.py` | Pipeline principal: coleta dados de mercado e cadastro, busca notícias, trata o DataFrame, invoca a LLM e exporta o CSV consolidado |
+| `LLM.py` | Comunicação com a Groq, construção de prompts, parsing de JSON e geração de relatórios por ticker |
+| `dashboard.py` | Aplicação Streamlit que lê o CSV gerado e exibe indicadores, gráficos e análises |
 
-├── LLM.py              # Integração com Groq Cloud
+## Pré-requisitos
 
-├── main.py             # Script principal de coleta (Pipeline)
+- Python 3.10+
+- Conta gratuita na [Groq](https://console.groq.com) para obtenção da API key
+- Conta gratuita na [NewsAPI](https://newsapi.org) para busca de notícias (opcional)
 
-├── pendentes.txt       # Fila de tickers para processamento
+## Instalação
 
-└── hipotese_capital.db # Banco de dados SQLite
-
-⚙️ Instalação e Configuração
-1. Pré-requisitos
-Python 3.9+
-
-Groq API Key (para as análises da IA)
-
-NewsAPI Key ( para coleta de notícias)
-
-2. Passos
-Clone o repositório e acesse a pasta.
-
-Instale as dependências:
-
-# Bash
-
+```bash
 pip install -r requirements.txt
+```
 
-__________________________________
+## Configuração
 
-Configure o arquivo .env na raiz do projeto com suas chaves:
+Crie um arquivo `.env` na raiz do projeto:
 
-
+```
 GROQ_API_KEY=sua_chave_aqui
+NEWS_API_KEY=sua_chave_aqui        # opcional
+LLM_MODEL=llama-3.3-70b-versatile  # modelo padrão
+```
 
-NEWS_API_KEY=sua_chave_aqui
+## Uso
 
-LLM_MODEL=llama-3.3-70b-versatile
+### 1. Executar o pipeline de coleta e análise
 
-
-Inicialize o banco de dados e rode a coleta:
-
-# Bash
+```bash
 python main.py
+```
 
+O script gera o arquivo `empresas_com_analise.csv` com os dados brutos e os relatórios da LLM.
+
+### 2. Abrir o dashboard
+
+```bash
 streamlit run dashboard.py
+```
 
-__________________________________
+## Indicadores coletados
 
-Ao adicionar mais ticker no dashboard, deve-serepetir o mesmo processo para coletar os dados:
+- **Cotação:** preço atual, variação diária, market cap, beta
+- **Fundamentalistas:** P/L, ROE, Dívida/Patrimônio, Dividend Yield, Free Cash Flow, Margem EBITDA, Margem Operacional, Liquidez Corrente
+- **Range 52 semanas:** mínima e máxima com barra de posição relativa
+- **Notícias:** até 5 artigos recentes com classificação de sentimento pela IA
 
-python main.py
+## Stack
 
-streamlit run dashboard.py 
+- **Dados:** `yfinance`, `requests`, `pandas`
+- **IA:** `groq` (Llama 3), `tenacity` (retry com backoff exponencial)
+- **Dashboard:** `streamlit`, `plotly`
+- **Config:** `python-dotenv`
